@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nora - AI Lawyer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f7f6;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: none;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .response {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e9e9e9;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Ask Nora - Your AI Lawyer</h1>
+    <textarea id="query" placeholder="Enter your legal question here..."></textarea>
+    <button onclick="askQuestion()">Ask Nora</button>
+
+    <div class="response" id="response" style="display: none;"></div>
+</div>
+
+<script>
+    async function askQuestion() {
+        const query = document.getElementById('query').value;
+        if (query.trim() === '') {
+            alert('Please enter a question.');
+            return;
+        }
+
+        // Send query to backend
+        const responseDiv = document.getElementById('response');
+        responseDiv.style.display = 'none'; // Hide previous response
+
+        try {
+            const response = await fetch('/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query })
+            });
+
+            const data = await response.json();
+
+            if (data.response) {
+                responseDiv.style.display = 'block';
+                responseDiv.innerHTML = '<strong>Response:</strong><br>' + data.response;
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch (error) {
+            alert('There was an error with the request.');
+        }
+    }
+</script>
+
+<!-- PyScript library (if needed) -->
+<link rel="stylesheet" href="https://pyscript.net/alpha/pyscript.css">
+<script defer src="https://pyscript.net/alpha/pyscript.js"></script>
+
+    <py-script> 
+        from langchain_ollama import OllamaLLM
+from langchain_core.prompts import ChatPromptTemplate
+import time
+import sys
+import os
+import re
+
+# Define the updated template for the assistant's responses
+template = """
+Hi there! I'm Nora, your AI legal assistant here to support Canadian lawyers like you with your daily tasks. 
+Whether you're dealing with federal laws like the Canada Evidence Act, the Criminal Code, or navigating specific 
+provincial regulations, I’m here to help with insights and resources.
+
+### Here's how I can assist:
+1. **Legal Guidance:** Provide general guidance based on Canadian laws and publicly available legal resources.
+2. **Jurisdictional Insights:** Highlight key distinctions between federal and provincial jurisdictions, as needed.
+3. **Legislation and Case Law References:** Reference specific sections of Canadian statutes or notable case law to back up my responses.
+4. **Document Organization Tips:** Offer advice on how to organize case documents or evidence for efficient handling.
+
+Let’s dive into your questions while keeping it clear, concise, and actionable. I’ll tailor my response to your needs, considering jurisdictional nuances.
+
+**A Quick Note:**  
+Remember, I provide information based on publicly accessible data and cannot replace personalized legal advice. For case-specific concerns, be sure to consult a licensed lawyer.
+
+---
+
+**Conversation History:**
+{context}
+
+User: {question}
+Nora:
+"""
+
+# Initialize model and prompt chain
+model = OllamaLLM(model="llama3")
+prompt = ChatPromptTemplate.from_template(template)
+chain = prompt | model
+context = ""
+current_language = "English"  # Default to English
+
+# Function to read uploaded files
+def read_file(file_path):
+    try:
+        with open(file_path, "r") as file:
+            content = file.read()
+        return content
+    except FileNotFoundError:
+        return "Nora: The file at '{}' was not found. Please check the path and try again.".format(file_path)
+    except PermissionError:
+        return "Nora: Permission denied to access the file at '{}'. Please check the permissions.".format(file_path)
+    except Exception as e:
+        return f"Nora: An error occurred while reading the file: {e}"
+
+# Function to summarize a case
+def summarize_case(case_text, language="English"):
+    result = chain.invoke({"context": context, "question": case_text, "language": language})
+    return result
+
+def type_writer(text, delay=0.0, rtl=False):
+    """Simulate real-time typing effect for any given response."""
+    if rtl:
+        # Add Unicode markers for Right-to-Left (RTL) text
+        text = "\u202B" + text + "\u202C"  # Enclose text with RTL markers
+    for char in text:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(delay)
+    sys.stdout.write("\n")
+
+def respond_with_typing_effect(response, language="English"):
+    # Check if language is Persian, and set RTL (Right-To-Left) text direction if true
+    rtl = language == "Persian"
+    type_writer(response, rtl=rtl)  # Pass only 'rtl' to type_writer
+    print("\n")
+
+# Function to detect the requested language
+def detect_language(input_text):
+    global current_language
+    if "language: persian" in input_text.lower():
+        current_language = "Persian"
+        return "Persian"
+    elif "language: french" in input_text.lower():
+        current_language = "French"
+        return "French"
+    elif "language: english" in input_text.lower():
+        current_language = "English"
+        return "English"
+    return current_language  # Return current language if not specified
+
+# Function to extract name from user's introduction
+def extract_name(introduction_text):
+    name_patterns = [
+        r"(?:My name is|I'm)\s+([A-Za-z\s]+)",
+        r"([A-Za-z\s]+)(?: is|,)",
+    ]
+    for pattern in name_patterns:
+        match = re.search(pattern, introduction_text)
+        if match:
+            return match.group(1).strip()
+    return None
+
+# Function to limit conversation context
+def limit_context(context, max_turns=10):
+    context_lines = context.split("\n")
+    if len(context_lines) > max_turns * 2:  # Assuming 1 user + 1 assistant line per turn
+        context = "\n".join(context_lines[-max_turns * 2:])
+    return context
+
+# Main loop for interaction
+print()
+user_intro = input("Please introduce yourself: ").strip()
+user_name = extract_name(user_intro)
+
+# Modify greeting to a casual tone
+if user_name:
+    context += f"\nUser: {user_intro}\nNora: Hi {user_name}, nice to meet you!"
+else:
+    context += f"\nUser: {user_intro}\nNora: Hi, nice to meet you!"
+
+# Respond with a brief introduction only once
+respond_with_typing_effect("Hi! I'm Nora, your AI legal assistant. How can I assist you today?", language="English")
+
+while True:
+    user_input = input("You: ").strip()
+
+    if user_input.lower() in ["exit", "quit"]:
+        print()
+        farewell_message = (
+            f"Nora: Thank you for using Nora, {user_name}. Goodbye!" if user_name
+            else "Nora: Thank you for using Nora. Goodbye!"
+        )
+        respond_with_typing_effect(farewell_message, language=current_language)
+        break
+
+    # Detect language and handle any language switch request
+    language = detect_language(user_input)
+    # Remove language specifier from the input
+    user_input = re.sub(r"(?i)language: (english|french|persian)", "", user_input).strip()
+
+    if user_input.lower().startswith("upload file"):
+        file_path = input("Please provide the path to the file: ").strip()
+        if not file_path:
+            respond_with_typing_effect("Nora: No file path was provided. Please try again.", language=language)
+            continue
+
+        if os.path.exists(file_path):
+            case_text = read_file(file_path)
+            respond_with_typing_effect("Nora: I have received the case details. Summarizing the case...", language=language)
+
+            summarized_advice = summarize_case(case_text, language)
+            respond_with_typing_effect(f"{summarized_advice}", language=language)
+
+            context += f"\nUser: Uploaded file with case details\nNora: {summarized_advice}"
+        else:
+            respond_with_typing_effect("Nora: The file path is invalid. Please provide a correct path.", language=language)
+        continue
+
+    try:
+        # Process the user query with correct language
+        result = chain.invoke({
+            "context": context,
+            "question": user_input,
+            "language": language
+        })
+        respond_with_typing_effect(f"{result}", language=language)
+
+        # Update context with the user's query and response
+        context += f"\nUser (in {language}): {user_input}\nNora (in {language}): {result}"
+        context = limit_context(context)  # Limit context to manage performance
+
+    except Exception as e:
+        respond_with_typing_effect(
+            f"Nora: An error occurred while processing your request. Please try again. Error: {e}",
+            language=language
+        )
+    </py-script>
+</body>
+</html>
