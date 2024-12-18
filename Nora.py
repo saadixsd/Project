@@ -3,34 +3,71 @@ from langchain_core.prompts import ChatPromptTemplate
 import re
 import time
 import sys
+from flask import Flask, request, jsonify
+import os
+import logging
+from js import document
 
-# Define the template for the assistant's responses
-template = """
-Hi there! I'm Nora, your AI assistant. Let me know how I can help, and I'll tailor my responses to your needs. 
+# Function to update chat box with a new message
+def update_chat_box(message):
+    chat_box = document.getElementById("chat-box")
+    chat_box.innerHTML += f"<p>{message}</p>"
+    chat_box.scrollTop = chat_box.scrollHeight
+
+# Function to simulate an AI response
+def simulate_nora_response(user_input):
+    # Simulate Nora's response based on user input (mock response)
+    if "legal" in user_input.lower():
+        return "Nora: I can help with legal research. What case do you need assistance with?"
+    elif "case" in user_input.lower():
+        return "Nora: Please provide more details about the case you are studying."
+    else:
+        return "Nora: How can I assist you with that?"
+
+# Function to send a message
+def send_message(event):
+    user_input = document.getElementById("user-input").value
+    if user_input.strip() != "":
+        update_chat_box(f"You: {user_input}")
+        # Simulate a response from Nora
+        nora_response = simulate_nora_response(user_input)
+        update_chat_box(nora_response)
+        document.getElementById("user-input").value = ""
+
+# Bind the send button with send_message function
+document.getElementById("send-button").bind("click", send_message)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)  # Change to DEBUG for development, INFO for production
+logger = logging.getLogger(__name__)
+
+# Flask App Initialization
+app = Flask(__name__)
+
+# Initialize model and prompt chain
+model = OllamaLLM(model="llama3")  # Replace with your specific model
+template = """Hi there! I'm Nora, your AI assistant. Let me know how I can help, and I'll tailor my responses to your needs. 
 Whether it's legal insights, academic support, or general questions, I’m here for you.
 
 **Conversation History:**
 {context}
 
 User: {question}
-Nora:\
-"""
-
-# Initialize model and prompt chain
-model = OllamaLLM(model="llama3")
+Nora:"""
 prompt = ChatPromptTemplate.from_template(template)
 chain = prompt | model
 
-# Function to extract the user's name and role from their introduction
+# Function to extract user details from their introduction
 def extract_user_details(introduction_text):
     """Extracts the user's name and role from their introduction."""
     name_patterns = [
-        r"(?i)(?:my name is|i'm|i am)\s+([A-Za-z\s]+)",  # Matches phrases like "My name is Jay"
-        r"([A-Za-z\s]+)(?:,? a lawyer|,? a legal professional|,? an attorney)",  # Matches "Jay, a lawyer"
+        r"(?i)(?:my name is|i'm|i am|this is)\s+([A-Za-z]+)",  
+        r"(?i)(?:hi,?\s*|hello,?\s*)i'm\s+([A-Za-z]+)", 
+        r"([A-Za-z]+)(?:,?\s+a\s+lawyer|,?\s+a\s+legal professional|,?\s+an\s+attorney|,?\s+a\s+student)" 
     ]
     role_patterns = [
-        r"(?i)\b(?:lawyer|legal professional|attorney)\b",  # Matches "lawyer" or similar terms
-        r"(?i)\b(?:student|academic)\b",  # Matches "student"
+        r"(?i)\b(?:lawyer|legal professional|attorney)\b",  # Matches legal roles
+        r"(?i)\b(?:student|academic)\b",  # Matches "student" or "academic"
     ]
 
     name = "User"  # Default name
@@ -52,71 +89,114 @@ def extract_user_details(introduction_text):
 
     return name, role
 
-# Real-time typing effect function
-def type_writer(text, delay=0.03):
-    """Simulates real-time typing effect for any given response."""
+# Typing effect function with optional disabling
+def type_writer(text, delay=0.03, enable_typing=True):
+    """Simulates a typing effect for a response."""
+    if not enable_typing:
+        print(text)
+        return
     for char in text:
         sys.stdout.write(char)
         sys.stdout.flush()
         time.sleep(delay)
     sys.stdout.write("\n")
 
-# Function to handle conversation flow
+# Truncate context to manage input size
+def truncate_context(context, max_lines=20):
+    """Truncates the conversation context to the last 'max_lines' lines."""
+    lines = context.split("\n")
+    return "\n".join(lines[-max_lines:])
+
+# Handle conversation logic
 def handle_conversation(user_input, context):
+    """Handles the conversation flow by querying the model and generating follow-ups."""
     try:
-        # Example: Customize follow-ups based on context
+        # Add custom follow-up responses
         if "case" in user_input.lower():
             follow_up = "Could you tell me more about the case? Any specific issues you're dealing with?"
         else:
             follow_up = "What else can I assist you with?"
 
-        # Pass the user input and context to the model
+        # Log input to the model
+        logger.debug("Input to model: %s", {"context": context, "question": user_input})
+
+        # Query the model
         result = chain.invoke({"context": context, "question": user_input})
+
+        # Log raw model response
+        logger.debug("Raw response from model: %s", result)
+
         return result + "\n\n" + follow_up
     except Exception as e:
-        return f"Nora: An error occurred while processing your request. Please try again. Error: {e}"
+        logger.error("Error processing request: %s", e)
+        return f"I'm sorry, there was an error processing your request. Please try again. Error: {e}"
 
-# Web-like interaction simulation
+# Flask API route
+@app.route('/ask', methods=['POST'])
+def ask():
+    """API endpoint to handle user queries."""
+    try:
+        data = request.get_json()
+        question = data.get('question', '')
+        context = data.get('context', '')
+
+        # Validate input
+        if not question:
+            return jsonify({'error': 'Question is required.'}), 400
+
+        # Generate response
+        response = handle_conversation(question, context)
+        return jsonify({'response': response})
+    except Exception as e:
+        logger.error("API Error: %s", e)
+        return jsonify({'error': f"An unexpected error occurred: {e}"}), 500
+
+# Simulated web-like interaction in the console
 def web_interaction():
-    print()
-    print("Nora: Welcome to your AI assistant platform!")
-    print()
+    """Simulates user interaction via the console."""
+    print("\nNora: Welcome to your AI assistant platform!\n")
     
-    # Prompt for user introduction
+    # User introduction
     user_intro = input("Nora: Please introduce yourself: ").strip()
     if user_intro.lower() in ["exit", "quit"]:
         print("Nora: Goodbye! Have a great day!")
         return  # End the program
-    
-    # Extract user details (name and role)
+
+    # Extract user details
     user_name, user_role = extract_user_details(user_intro)
 
-    # Generate a personalized welcome message
-    if user_role == "lawyer":
-        role_message = "case insights, legal references, and tailored guidance."
-    elif user_role == "student":
-        role_message = "help with assignments, case studies, or understanding legal principles."
-    else:
-        role_message = "answers to your general queries or tasks."
+    # Personalized welcome message
+    role_message = {
+        "lawyer": "case insights, legal references, and tailored guidance.",
+        "student": "help with assignments, case studies, or understanding legal principles.",
+    }.get(user_role, "answers to your general queries or tasks.")
 
-    # Display personalized welcome message
     type_writer(f"Nora: Hi {user_name}, nice to meet you! Since you're a {user_role}, I can assist with {role_message} How can I help you today?")
 
-    # Initialize context for conversation
+    # Initialize conversation context
     context = f"User: {user_intro}\nNora: Hi {user_name}, nice to meet you!\nNora: Since you're a {user_role}, I can assist with {role_message}"
 
     while True:
-        # Handle conversation loop
+        # Get user input
         user_input = input(f"{user_name}: ").strip()
         if user_input.lower() in ["exit", "quit"]:
             farewell_message = f"Thank you for using Nora. Goodbye, {user_name}!"
             type_writer(f"Nora: {farewell_message}")
             break
 
-        # Process user query and respond
+        # Generate response
         response = handle_conversation(user_input, context)
         type_writer(f"Nora: {response}")
-        context += f"\nUser: {user_input}\nNora: {response}"
 
-# Start the interaction
-web_interaction()
+        # Update context and truncate
+        context += f"\nUser: {user_input}\nNora: {response}"
+        context = truncate_context(context)
+
+# Main Entry Point
+if __name__ == '__main__':
+    # Flask mode
+    if os.getenv('FLASK_MODE', 'False').lower() == 'true':
+        app.run(debug=True)
+    else:
+        # Console interaction
+        web_interaction()
