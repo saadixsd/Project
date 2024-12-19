@@ -6,13 +6,11 @@ import sys
 from flask import Flask, request, jsonify
 import os
 import logging
-from js import document
+from flask_cors import CORS
 
-# Function to update chat box with a new message
-def update_chat_box(message):
-    chat_box = document.getElementById("chat-box")
-    chat_box.innerHTML += f"<p>{message}</p>"
-    chat_box.scrollTop = chat_box.scrollHeight
+
+app = Flask(__name__)
+CORS(app)
 
 # Function to simulate an AI response
 def simulate_nora_response(user_input):
@@ -24,22 +22,12 @@ def simulate_nora_response(user_input):
     else:
         return "Nora: How can I assist you with that?"
 
-# Function to send a message
-def send_message(event):
-    user_input = document.getElementById("user-input").value
-    if user_input.strip() != "":
-        update_chat_box(f"You: {user_input}")
-        # Simulate a response from Nora
-        nora_response = simulate_nora_response(user_input)
-        update_chat_box(nora_response)
-        document.getElementById("user-input").value = ""
-
-# Bind the send button with send_message function
-document.getElementById("send-button").bind("click", send_message)
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)  # Change to DEBUG for development, INFO for production
 logger = logging.getLogger(__name__)
+
+# Disable the HTTP request logs from 'httpx'
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Flask App Initialization
 app = Flask(__name__)
@@ -91,15 +79,17 @@ def extract_user_details(introduction_text):
 
 # Typing effect function with optional disabling
 def type_writer(text, delay=0.03, enable_typing=True):
-    """Simulates a typing effect for a response."""
+    """Simulates a typing effect for a response with an added space after each interaction."""
     if not enable_typing:
         print(text)
+        print()  # Add a space after the output
         return
     for char in text:
         sys.stdout.write(char)
         sys.stdout.flush()
         time.sleep(delay)
-    sys.stdout.write("\n")
+    sys.stdout.write("\n\n")  # Add a double line break (one for the text and one for space)
+
 
 # Truncate context to manage input size
 def truncate_context(context, max_lines=20):
@@ -108,14 +98,15 @@ def truncate_context(context, max_lines=20):
     return "\n".join(lines[-max_lines:])
 
 # Handle conversation logic
-def handle_conversation(user_input, context):
+def handle_conversation(user_input, context, user_role):
     """Handles the conversation flow by querying the model and generating follow-ups."""
     try:
-        # Add custom follow-up responses
-        if "case" in user_input.lower():
+        # Add custom follow-up responses, but only once per interaction for non-lawyers
+        follow_up = ""
+        
+        # Avoid unnecessary follow-up questions for lawyers
+        if user_role != "lawyer" and "case" in user_input.lower():
             follow_up = "Could you tell me more about the case? Any specific issues you're dealing with?"
-        else:
-            follow_up = "What else can I assist you with?"
 
         # Log input to the model
         logger.debug("Input to model: %s", {"context": context, "question": user_input})
@@ -126,10 +117,12 @@ def handle_conversation(user_input, context):
         # Log raw model response
         logger.debug("Raw response from model: %s", result)
 
-        return result + "\n\n" + follow_up
+        # Return the model response with the follow-up only once for non-lawyers
+        return result + "\n\n" + follow_up if follow_up else result
     except Exception as e:
         logger.error("Error processing request: %s", e)
         return f"I'm sorry, there was an error processing your request. Please try again. Error: {e}"
+
 
 # Flask API route
 @app.route('/ask', methods=['POST'])
@@ -139,13 +132,14 @@ def ask():
         data = request.get_json()
         question = data.get('question', '')
         context = data.get('context', '')
+        user_role = data.get('user_role', 'user')  # Assuming user_role is passed in the request
 
         # Validate input
         if not question:
             return jsonify({'error': 'Question is required.'}), 400
 
         # Generate response
-        response = handle_conversation(question, context)
+        response = handle_conversation(question, context, user_role)
         return jsonify({'response': response})
     except Exception as e:
         logger.error("API Error: %s", e)
@@ -180,12 +174,13 @@ def web_interaction():
         # Get user input
         user_input = input(f"{user_name}: ").strip()
         if user_input.lower() in ["exit", "quit"]:
+            
             farewell_message = f"Thank you for using Nora. Goodbye, {user_name}!"
             type_writer(f"Nora: {farewell_message}")
             break
 
         # Generate response
-        response = handle_conversation(user_input, context)
+        response = handle_conversation(user_input, context, user_role)
         type_writer(f"Nora: {response}")
 
         # Update context and truncate
